@@ -85,18 +85,10 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
         const optDisp = form.addField({
             id: 'custpage_opt_disp',
             type: serverWidget.FieldType.CHECKBOX,
-            label: 'Print External (Display) Names',
+            label: 'Print Extended Item Names',
             container: 'custpage_grp_options'
         });
-        optDisp.defaultValue = 'F';
-
-        const optUpc = form.addField({
-            id: 'custpage_opt_upc',
-            type: serverWidget.FieldType.CHECKBOX,
-            label: 'Print UPC Codes',
-            container: 'custpage_grp_options'
-        });
-        optUpc.defaultValue = 'T';
+        optDisp.defaultValue = 'T';
 
         // ---- Item lines ----------------------------------------------------
         const sublist = form.addSublist({
@@ -172,8 +164,8 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
 
             setVal('custpage_select', 'T'); // default: everything checked
             setVal('custpage_line', i);
-            setVal('custpage_item', so.getSublistText({ sublistId: 'item', fieldId: 'item', line: i }));
-            setVal('custpage_desc', so.getSublistValue({ sublistId: 'item', fieldId: 'description', line: i }));
+            setVal('custpage_item', cleanItemName(so.getSublistText({ sublistId: 'item', fieldId: 'item', line: i })));
+            setVal('custpage_desc', getLineDescription(so, i));
             setVal('custpage_qty', so.getSublistValue({ sublistId: 'item', fieldId: 'quantity', line: i }));
             setVal('custpage_committed', so.getSublistValue({ sublistId: 'item', fieldId: 'quantitycommitted', line: i }));
             setVal('custpage_units', so.getSublistText({ sublistId: 'item', fieldId: 'units', line: i }));
@@ -196,8 +188,7 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
 
         const options = {
             printDescriptions: request.parameters.custpage_opt_desc === 'T',
-            printDisplayNames: request.parameters.custpage_opt_disp === 'T',
-            printUpc: request.parameters.custpage_opt_upc === 'T'
+            printExtNames: request.parameters.custpage_opt_disp === 'T'
         };
 
         const so = record.load({
@@ -250,11 +241,13 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
     };
 
     /**
-     * Looks up display name and UPC code for the items on the selected lines.
+     * Looks up display name, sales description, and (when the account has
+     * them) Color / Size / sq-ft attributes for the items on the selected
+     * lines. Falls back to a plain lookup when custom columns are missing.
      *
      * @param {Record} so
      * @param {number[]} selectedLines
-     * @returns {Object} map of item internal id -> { displayName, upc }
+     * @returns {Object} map of item internal id -> item attributes
      */
     const lookupItemInfo = (so, selectedLines) => {
         const ids = [];
@@ -270,23 +263,74 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
             return map;
         }
 
-        try {
+        const runLookup = (withCustomFields) => {
+            const columns = ['displayname', 'salesdescription'];
+            if (withCustomFields) {
+                // ConventionSuite matrix attributes (color / size)
+                columns.push('custitem27', 'custitem28');
+            }
             search.create({
                 type: 'item',
                 filters: [['internalid', 'anyof', ids]],
-                columns: ['displayname', 'upccode']
+                columns: columns
             }).run().each((result) => {
                 map[result.id] = {
                     displayName: result.getValue({ name: 'displayname' }) || '',
-                    upc: result.getValue({ name: 'upccode' }) || ''
+                    salesDesc: result.getValue({ name: 'salesdescription' }) || '',
+                    color: withCustomFields ? (result.getText({ name: 'custitem27' }) || '') : '',
+                    size: withCustomFields ? (result.getText({ name: 'custitem28' }) || '') : ''
                 };
                 return true;
             });
+        };
+
+        try {
+            runLookup(true);
         } catch (e) {
-            // Item lookup is a nice-to-have; never block printing on it
+            try {
+                runLookup(false);
+            } catch (e2) {
+                // Item lookup is a nice-to-have; never block printing on it
+            }
         }
 
         return map;
+    };
+
+    /**
+     * Line description: prefers the ConventionSuite line description column,
+     * falls back to the standard description field.
+     */
+    const getLineDescription = (so, line) => {
+        let desc = '';
+        try {
+            desc = so.getSublistValue({ sublistId: 'item', fieldId: 'custcol_description', line: line }) || '';
+        } catch (e) { /* column not present in this account */ }
+        if (!desc) {
+            desc = so.getSublistValue({ sublistId: 'item', fieldId: 'description', line: line }) || '';
+        }
+        return desc;
+    };
+
+    /** Custom carpet size on the line (sq-ft items), when the column exists. */
+    const getLineCustomSize = (so, line) => {
+        try {
+            return so.getSublistValue({ sublistId: 'item', fieldId: 'custcol_custom_carpet_size', line: line }) || '';
+        } catch (e) {
+            return '';
+        }
+    };
+
+    /** Strips the "Parent : Child" hierarchy prefix from an item name. */
+    const cleanItemName = (name) => String(name || '').split(' : ').pop();
+
+    /** getText that tolerates fields missing from this account/record. */
+    const safeText = (rec, fieldId) => {
+        try {
+            return rec.getText({ fieldId: fieldId }) || '';
+        } catch (e) {
+            return '';
+        }
     };
 
     /**
@@ -304,9 +348,12 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
         const tranDate = esc(formatDate(so.getValue({ fieldId: 'trandate' })));
         const shipDate = esc(formatDate(so.getValue({ fieldId: 'shipdate' })));
         const poNum = esc(so.getValue({ fieldId: 'otherrefnum' }));
-        const shipMethod = esc(so.getText({ fieldId: 'shipmethod' }));
-        const salesRep = esc(so.getText({ fieldId: 'salesrep' }));
-        const location = esc(so.getText({ fieldId: 'location' }));
+        const shipMethod = esc(safeText(so, 'shipmethod'));
+        const salesRep = esc(safeText(so, 'salesrep'));
+        const location = esc(safeText(so, 'location'));
+        const showName = esc(safeText(so, 'custbody_show_table'));
+        const booth = esc(safeText(so, 'custbody_booth'));
+        const orderType = esc(safeText(so, 'custbody_ng_cs_order_type'));
         const status = esc(so.getValue({ fieldId: 'status' }));
         const memo = esc(so.getValue({ fieldId: 'memo' }));
         const shipAddress = esc(so.getValue({ fieldId: 'shipaddress' })).replace(/\r?\n/g, '<br />');
@@ -328,29 +375,34 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
             const itemId = so.getSublistValue({ sublistId: 'item', fieldId: 'item', line: line });
             const info = itemInfo[itemId] || {};
 
-            const item = esc(so.getSublistText({ sublistId: 'item', fieldId: 'item', line: line }));
-            const desc = esc(so.getSublistValue({ sublistId: 'item', fieldId: 'description', line: line }));
+            const item = esc(cleanItemName(so.getSublistText({ sublistId: 'item', fieldId: 'item', line: line })));
+            const desc = esc(getLineDescription(so, line) || info.salesDesc || '');
             const qty = so.getSublistValue({ sublistId: 'item', fieldId: 'quantity', line: line });
             const units = esc(so.getSublistText({ sublistId: 'item', fieldId: 'units', line: line }));
             const lineLoc = esc(so.getSublistText({ sublistId: 'item', fieldId: 'location', line: line }));
+            const customSize = getLineCustomSize(so, line);
 
             totalQty += Number(qty) || 0;
 
-            // Item cell: item name, with optional UPC beneath in small gray text
+            // Item cell: name, optional extended name, then Color / Size attributes
             let itemCell = '<span class="item-name">' + item + '</span>';
-            if (options.printUpc && info.upc) {
-                itemCell += '<br /><span class="sub">UPC: ' + esc(info.upc) + '</span>';
+            if (options.printExtNames && info.displayName) {
+                itemCell += '<br /><i>' + esc(info.displayName) + '</i>';
+            }
+            const attrs = [];
+            if (info.color) {
+                attrs.push('<b>Color:</b> ' + esc(info.color));
+            }
+            if (info.size) {
+                attrs.push('<b>Size:</b> ' + esc(info.size));
+            } else if (customSize) {
+                attrs.push('<b>Size:</b> ' + esc(customSize));
+            }
+            if (attrs.length > 0) {
+                itemCell += '<br /><span class="sub">' + attrs.join(' &#8226; ') + '</span>';
             }
 
-            // Description cell: description and/or external display name
-            const descParts = [];
-            if (options.printDisplayNames && info.displayName) {
-                descParts.push('<span class="item-name">' + esc(info.displayName) + '</span>');
-            }
-            if (options.printDescriptions && desc) {
-                descParts.push(desc);
-            }
-            const descCell = descParts.join('<br />') || '&nbsp;';
+            const descCell = (options.printDescriptions && desc) ? desc : '&nbsp;';
 
             const rowClass = (rowNum % 2 === 0) ? 'row alt' : 'row';
 
@@ -365,13 +417,33 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
                 '</tr>';
         }
 
-        const infoRow = (label1, value1, label2, value2) =>
-            '<tr>' +
-            '<td class="lbl" width="17%">' + label1 + '</td>' +
-            '<td class="val" width="33%">' + (value1 || '&#8212;') + '</td>' +
-            '<td class="lbl" width="17%">' + label2 + '</td>' +
-            '<td class="val" width="33%">' + (value2 || '&#8212;') + '</td>' +
-            '</tr>';
+        // Two label/value pairs per row; optional pairs are skipped when empty
+        const infoPairs = [
+            ['CUSTOMER', customer, true],
+            ['ORDER DATE', tranDate, true],
+            ['SHOW / EVENT', showName, false],
+            ['BOOTH', booth, false],
+            ['ORDER TYPE', orderType, false],
+            ['PO #', poNum, false],
+            ['SHIP DATE', shipDate, true],
+            ['SHIP VIA', shipMethod, false],
+            ['SALES REP', salesRep, false],
+            ['LOCATION', location, false],
+            ['MEMO', memo, false]
+        ].filter((pair) => pair[2] || pair[1]);
+
+        let infoGrid = '';
+        for (let p = 0; p < infoPairs.length; p += 2) {
+            const a = infoPairs[p];
+            const b = infoPairs[p + 1] || ['', '', false];
+            infoGrid +=
+                '<tr>' +
+                '<td class="lbl" width="17%">' + a[0] + '</td>' +
+                '<td class="val" width="33%">' + (a[1] || '&#8212;') + '</td>' +
+                '<td class="lbl" width="17%">' + b[0] + '</td>' +
+                '<td class="val" width="33%">' + (b[1] || (b[0] ? '&#8212;' : '&nbsp;')) + '</td>' +
+                '</tr>';
+        }
 
         return '<?xml version="1.0"?>' +
             '<!DOCTYPE pdf PUBLIC "-//big.faceless.org//report" "report-1.1.dtd">' +
@@ -436,12 +508,7 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
 
             // ---- Order info + ship-to ----
             '<table class="info"><tr><td width="58%" style="padding-right:14pt;">' +
-            '<table width="100%">' +
-            infoRow('CUSTOMER', customer, 'ORDER DATE', tranDate) +
-            infoRow('PO #', poNum, 'SHIP DATE', shipDate) +
-            infoRow('SHIP VIA', shipMethod, 'SALES REP', salesRep) +
-            infoRow('LOCATION', location, 'MEMO', memo) +
-            '</table>' +
+            '<table width="100%">' + infoGrid + '</table>' +
             '</td><td width="42%">' +
             '<table class="shipto">' +
             '<tr><td class="lbl">SHIP TO</td></tr>' +

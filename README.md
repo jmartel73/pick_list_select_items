@@ -20,8 +20,22 @@ Flow:
 2. A Suitelet page opens showing all item lines (description, subtotal,
    discount, tax, and shipping lines are automatically excluded). All lines
    start checked; use **Mark All** / **Unmark All** or individual checkboxes.
+   This makes it easy to print a pick list for just a few late-added lines
+   after the rest of the order has already been pulled.
 3. Click **Print Pick List** on the Suitelet. A PDF opens inline with only the
    selected lines, including a "Picked" write-in box per line for warehouse use.
+
+The printout includes the order context (customer, dates, Show/Event, Booth,
+and Order Type when present, ship-to address, location, memo) and per line the
+item name (hierarchy prefix stripped), optional extended item name, Color /
+Size attributes (including custom carpet size), optional description, location,
+and quantity with units.
+
+Print options on the selection screen (mirroring the legacy pull list report):
+
+- **Print Item Descriptions** (line description, falling back to the item's
+  sales description)
+- **Print Extended Item Names** (the item's display name, shown in italics)
 
 ## Installation
 
