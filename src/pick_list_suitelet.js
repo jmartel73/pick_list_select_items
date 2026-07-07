@@ -6,15 +6,15 @@
  * Pick List Suitelet
  * ------------------
  * GET  : Shows all item lines of a Sales Order with a checkbox per line
- *        (with native Mark All / Unmark All buttons).
+ *        (with native Mark All / Unmark All buttons) plus print options.
  * POST : Renders a PDF pick list containing ONLY the checked lines.
  *
  * Expected deployment IDs (referenced by the client script):
  *   Script ID     : customscript_pick_list_sl
  *   Deployment ID : customdeploy_pick_list_sl
  */
-define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error'],
-    (serverWidget, record, render, format, error) => {
+define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/search', 'N/config'],
+    (serverWidget, record, render, format, error, search, config) => {
 
     const SUBLIST_ID = 'custpage_items';
 
@@ -71,6 +71,34 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error'],
             '<p style="font-size:12px;">Check the lines to include on the pick list, ' +
             'then click <b>Print Pick List</b>. Unchecked lines are left off the printout.</p>';
 
+        // ---- Print options -------------------------------------------------
+        form.addFieldGroup({ id: 'custpage_grp_options', label: 'Print Options' });
+
+        const optDesc = form.addField({
+            id: 'custpage_opt_desc',
+            type: serverWidget.FieldType.CHECKBOX,
+            label: 'Print Item Descriptions',
+            container: 'custpage_grp_options'
+        });
+        optDesc.defaultValue = 'T';
+
+        const optDisp = form.addField({
+            id: 'custpage_opt_disp',
+            type: serverWidget.FieldType.CHECKBOX,
+            label: 'Print External (Display) Names',
+            container: 'custpage_grp_options'
+        });
+        optDisp.defaultValue = 'F';
+
+        const optUpc = form.addField({
+            id: 'custpage_opt_upc',
+            type: serverWidget.FieldType.CHECKBOX,
+            label: 'Print UPC Codes',
+            container: 'custpage_grp_options'
+        });
+        optUpc.defaultValue = 'T';
+
+        // ---- Item lines ----------------------------------------------------
         const sublist = form.addSublist({
             id: SUBLIST_ID,
             type: serverWidget.SublistType.LIST,
@@ -105,6 +133,11 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error'],
             id: 'custpage_qty',
             type: serverWidget.FieldType.TEXT,
             label: 'Quantity'
+        });
+        sublist.addField({
+            id: 'custpage_committed',
+            type: serverWidget.FieldType.TEXT,
+            label: 'Committed'
         });
         sublist.addField({
             id: 'custpage_units',
@@ -142,6 +175,7 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error'],
             setVal('custpage_item', so.getSublistText({ sublistId: 'item', fieldId: 'item', line: i }));
             setVal('custpage_desc', so.getSublistValue({ sublistId: 'item', fieldId: 'description', line: i }));
             setVal('custpage_qty', so.getSublistValue({ sublistId: 'item', fieldId: 'quantity', line: i }));
+            setVal('custpage_committed', so.getSublistValue({ sublistId: 'item', fieldId: 'quantitycommitted', line: i }));
             setVal('custpage_units', so.getSublistText({ sublistId: 'item', fieldId: 'units', line: i }));
             setVal('custpage_location', so.getSublistText({ sublistId: 'item', fieldId: 'location', line: i }));
 
@@ -159,6 +193,12 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error'],
     const renderPickListPdf = (context) => {
         const request = context.request;
         const soId = request.parameters.custpage_soid;
+
+        const options = {
+            printDescriptions: request.parameters.custpage_opt_desc === 'T',
+            printDisplayNames: request.parameters.custpage_opt_disp === 'T',
+            printUpc: request.parameters.custpage_opt_upc === 'T'
+        };
 
         const so = record.load({
             type: record.Type.SALES_ORDER,
@@ -199,7 +239,8 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error'],
             return;
         }
 
-        const xml = buildPickListXml(so, selectedLines);
+        const itemInfo = lookupItemInfo(so, selectedLines);
+        const xml = buildPickListXml(so, selectedLines, itemInfo, options);
 
         const pdfFile = render.xmlToPdf({ xmlString: xml });
         pdfFile.name = 'PickList_' + so.getValue({ fieldId: 'tranid' }) + '.pdf';
@@ -209,84 +250,237 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error'],
     };
 
     /**
+     * Looks up display name and UPC code for the items on the selected lines.
+     *
+     * @param {Record} so
+     * @param {number[]} selectedLines
+     * @returns {Object} map of item internal id -> { displayName, upc }
+     */
+    const lookupItemInfo = (so, selectedLines) => {
+        const ids = [];
+        for (const line of selectedLines) {
+            const id = so.getSublistValue({ sublistId: 'item', fieldId: 'item', line: line });
+            if (id && ids.indexOf(id) === -1) {
+                ids.push(id);
+            }
+        }
+
+        const map = {};
+        if (ids.length === 0) {
+            return map;
+        }
+
+        try {
+            search.create({
+                type: 'item',
+                filters: [['internalid', 'anyof', ids]],
+                columns: ['displayname', 'upccode']
+            }).run().each((result) => {
+                map[result.id] = {
+                    displayName: result.getValue({ name: 'displayname' }) || '',
+                    upc: result.getValue({ name: 'upccode' }) || ''
+                };
+                return true;
+            });
+        } catch (e) {
+            // Item lookup is a nice-to-have; never block printing on it
+        }
+
+        return map;
+    };
+
+    /**
      * Builds the BFO XML for the pick list PDF.
      *
      * @param {Record} so - loaded Sales Order record
      * @param {number[]} selectedLines - item sublist line indexes to include
+     * @param {Object} itemInfo - map of item id -> { displayName, upc }
+     * @param {Object} options - print options from the selection form
      * @returns {string} XML string
      */
-    const buildPickListXml = (so, selectedLines) => {
+    const buildPickListXml = (so, selectedLines, itemInfo, options) => {
         const tranId = esc(so.getValue({ fieldId: 'tranid' }));
         const customer = esc(so.getText({ fieldId: 'entity' }));
         const tranDate = esc(formatDate(so.getValue({ fieldId: 'trandate' })));
         const shipDate = esc(formatDate(so.getValue({ fieldId: 'shipdate' })));
+        const poNum = esc(so.getValue({ fieldId: 'otherrefnum' }));
+        const shipMethod = esc(so.getText({ fieldId: 'shipmethod' }));
+        const salesRep = esc(so.getText({ fieldId: 'salesrep' }));
+        const location = esc(so.getText({ fieldId: 'location' }));
+        const status = esc(so.getValue({ fieldId: 'status' }));
         const memo = esc(so.getValue({ fieldId: 'memo' }));
-        const printedOn = esc(formatDate(new Date()));
+        const shipAddress = esc(so.getValue({ fieldId: 'shipaddress' })).replace(/\r?\n/g, '<br />');
+        const printedOn = esc(formatDateTime(new Date()));
 
+        let companyName = '';
+        try {
+            companyName = esc(config.load({ type: config.Type.COMPANY_INFORMATION })
+                .getValue({ fieldId: 'companyname' }));
+        } catch (e) { /* not critical */ }
+
+        // ---- Line rows -----------------------------------------------------
         let rows = '';
+        let totalQty = 0;
+        let rowNum = 0;
+
         for (const line of selectedLines) {
+            rowNum++;
+            const itemId = so.getSublistValue({ sublistId: 'item', fieldId: 'item', line: line });
+            const info = itemInfo[itemId] || {};
+
             const item = esc(so.getSublistText({ sublistId: 'item', fieldId: 'item', line: line }));
             const desc = esc(so.getSublistValue({ sublistId: 'item', fieldId: 'description', line: line }));
-            const qty = esc(so.getSublistValue({ sublistId: 'item', fieldId: 'quantity', line: line }));
+            const qty = so.getSublistValue({ sublistId: 'item', fieldId: 'quantity', line: line });
             const units = esc(so.getSublistText({ sublistId: 'item', fieldId: 'units', line: line }));
-            const location = esc(so.getSublistText({ sublistId: 'item', fieldId: 'location', line: line }));
+            const lineLoc = esc(so.getSublistText({ sublistId: 'item', fieldId: 'location', line: line }));
+
+            totalQty += Number(qty) || 0;
+
+            // Item cell: item name, with optional UPC beneath in small gray text
+            let itemCell = '<span class="item-name">' + item + '</span>';
+            if (options.printUpc && info.upc) {
+                itemCell += '<br /><span class="sub">UPC: ' + esc(info.upc) + '</span>';
+            }
+
+            // Description cell: description and/or external display name
+            const descParts = [];
+            if (options.printDisplayNames && info.displayName) {
+                descParts.push('<span class="item-name">' + esc(info.displayName) + '</span>');
+            }
+            if (options.printDescriptions && desc) {
+                descParts.push(desc);
+            }
+            const descCell = descParts.join('<br />') || '&nbsp;';
+
+            const rowClass = (rowNum % 2 === 0) ? 'row alt' : 'row';
 
             rows +=
-                '<tr>' +
-                '<td>' + item + '</td>' +
-                '<td>' + desc + '</td>' +
-                '<td>' + location + '</td>' +
-                '<td align="right">' + qty + '</td>' +
-                '<td>' + units + '</td>' +
+                '<tr class="' + rowClass + '">' +
+                '<td class="num">' + rowNum + '</td>' +
+                '<td>' + itemCell + '</td>' +
+                '<td>' + descCell + '</td>' +
+                '<td>' + (lineLoc || location || '&nbsp;') + '</td>' +
+                '<td class="qty">' + esc(qty) + (units ? ' <span class="sub">' + units + '</span>' : '') + '</td>' +
                 '<td class="pickbox">&nbsp;</td>' +
                 '</tr>';
         }
+
+        const infoRow = (label1, value1, label2, value2) =>
+            '<tr>' +
+            '<td class="lbl" width="17%">' + label1 + '</td>' +
+            '<td class="val" width="33%">' + (value1 || '&#8212;') + '</td>' +
+            '<td class="lbl" width="17%">' + label2 + '</td>' +
+            '<td class="val" width="33%">' + (value2 || '&#8212;') + '</td>' +
+            '</tr>';
 
         return '<?xml version="1.0"?>' +
             '<!DOCTYPE pdf PUBLIC "-//big.faceless.org//report" "report-1.1.dtd">' +
             '<pdf>' +
             '<head>' +
             '<style type="text/css">' +
-            '  body { font-family: Helvetica, sans-serif; font-size: 9pt; }' +
-            '  h1 { font-size: 16pt; margin-bottom: 2pt; }' +
-            '  table.header td { padding: 2pt 6pt 2pt 0; font-size: 9pt; }' +
-            '  table.items { width: 100%; margin-top: 12pt; }' +
-            '  table.items th { background-color: #e5e5e5; border-bottom: 1pt solid #333;' +
-            '                   padding: 4pt; font-size: 9pt; text-align: left; }' +
-            '  table.items td { border-bottom: 0.5pt solid #ccc; padding: 5pt 4pt; }' +
-            '  td.pickbox { border: 1pt solid #333; width: 28pt; }' +
+            '  body { font-family: Helvetica, sans-serif; font-size: 9pt; color: #222222; }' +
+            '  span.company { font-size: 10pt; color: #555555; letter-spacing: 1pt; }' +
+            '  span.title { font-size: 22pt; font-weight: bold; color: #1a1a1a; }' +
+            '  span.so-num { font-size: 15pt; font-weight: bold; }' +
+            '  span.status { font-size: 9pt; color: #555555; }' +
+            '  table.info { width: 100%; margin-top: 10pt; }' +
+            '  table.info td { padding: 3pt 6pt 3pt 0; vertical-align: top; }' +
+            '  td.lbl { font-size: 7pt; color: #777777; }' +
+            '  td.val { font-size: 9.5pt; }' +
+            '  table.shipto { width: 100%; margin-top: 8pt; }' +
+            '  td.shipto-box { border: 0.75pt solid #cccccc; padding: 6pt 8pt;' +
+            '                  font-size: 9pt; background-color: #fafafa; }' +
+            '  table.items { width: 100%; margin-top: 14pt; }' +
+            '  table.items th { background-color: #2b2b2b; color: #ffffff; padding: 5pt 5pt;' +
+            '                   font-size: 8pt; letter-spacing: 0.5pt; text-align: left; }' +
+            '  table.items td { padding: 6pt 5pt; border-bottom: 0.5pt solid #dddddd;' +
+            '                   vertical-align: top; }' +
+            '  tr.alt td { background-color: #f5f5f5; }' +
+            '  td.num { color: #888888; }' +
+            '  td.qty { text-align: right; font-size: 11pt; font-weight: bold; }' +
+            '  td.pickbox { border: 1pt solid #333333; width: 28pt; }' +
+            '  span.item-name { font-weight: bold; }' +
+            '  span.sub { font-size: 7.5pt; color: #777777; font-weight: normal; }' +
+            '  table.totals { width: 100%; margin-top: 2pt; }' +
+            '  table.totals td { padding: 6pt 5pt; font-size: 9.5pt; font-weight: bold;' +
+            '                    border-top: 1.5pt solid #2b2b2b; }' +
+            '  table.sign { width: 100%; margin-top: 34pt; }' +
+            '  table.sign td { width: 25%; padding: 2pt 12pt 2pt 0; }' +
+            '  td.sign-line { border-top: 0.75pt solid #333333; font-size: 7.5pt;' +
+            '                 color: #777777; padding-top: 3pt; }' +
             '</style>' +
             '<macrolist>' +
             '<macro id="nlfooter">' +
             '<table width="100%"><tr>' +
-            '<td style="font-size:8pt;">Printed: ' + printedOn + '</td>' +
-            '<td align="right" style="font-size:8pt;">Page <pagenumber/> of <totalpages/></td>' +
+            '<td style="font-size:7.5pt; color:#777777;">Pick List &#8226; Sales Order #' + tranId +
+            ' &#8226; Printed ' + printedOn + '</td>' +
+            '<td align="right" style="font-size:7.5pt; color:#777777;">Page <pagenumber/> of <totalpages/></td>' +
             '</tr></table>' +
             '</macro>' +
             '</macrolist>' +
             '</head>' +
             '<body footer="nlfooter" footer-height="20pt" padding="0.5in 0.5in 0.75in 0.5in" size="Letter">' +
-            '<h1>Pick List</h1>' +
-            '<table class="header">' +
-            '<tr><td><b>Sales Order:</b></td><td>' + tranId + '</td>' +
-            '<td><b>Date:</b></td><td>' + tranDate + '</td></tr>' +
-            '<tr><td><b>Customer:</b></td><td>' + customer + '</td>' +
-            '<td><b>Ship Date:</b></td><td>' + shipDate + '</td></tr>' +
-            (memo ? '<tr><td><b>Memo:</b></td><td colspan="3">' + memo + '</td></tr>' : '') +
+
+            // ---- Title band ----
+            '<table width="100%"><tr>' +
+            '<td>' +
+            (companyName ? '<span class="company">' + companyName.toUpperCase() + '</span><br />' : '') +
+            '<span class="title">PICK LIST</span>' +
+            '</td>' +
+            '<td align="right" style="vertical-align:bottom;">' +
+            '<span class="so-num">SO #' + tranId + '</span><br />' +
+            '<span class="status">' + status + '</span>' +
+            '</td>' +
+            '</tr></table>' +
+            '<hr style="margin-top:6pt; color:#2b2b2b; height:1.5pt;" />' +
+
+            // ---- Order info + ship-to ----
+            '<table class="info"><tr><td width="58%" style="padding-right:14pt;">' +
+            '<table width="100%">' +
+            infoRow('CUSTOMER', customer, 'ORDER DATE', tranDate) +
+            infoRow('PO #', poNum, 'SHIP DATE', shipDate) +
+            infoRow('SHIP VIA', shipMethod, 'SALES REP', salesRep) +
+            infoRow('LOCATION', location, 'MEMO', memo) +
             '</table>' +
+            '</td><td width="42%">' +
+            '<table class="shipto">' +
+            '<tr><td class="lbl">SHIP TO</td></tr>' +
+            '<tr><td class="shipto-box">' + (shipAddress || '&#8212;') + '</td></tr>' +
+            '</table>' +
+            '</td></tr></table>' +
+
+            // ---- Item lines ----
             '<table class="items">' +
             '<thead>' +
             '<tr>' +
-            '<th>Item</th>' +
-            '<th>Description</th>' +
-            '<th>Location</th>' +
-            '<th align="right">Qty</th>' +
-            '<th>Units</th>' +
-            '<th>Picked</th>' +
+            '<th width="4%">#</th>' +
+            '<th width="24%">ITEM</th>' +
+            '<th width="35%">DESCRIPTION</th>' +
+            '<th width="15%">LOCATION</th>' +
+            '<th width="12%" align="right">QTY</th>' +
+            '<th width="10%">PICKED</th>' +
             '</tr>' +
             '</thead>' +
             rows +
             '</table>' +
+
+            // ---- Totals ----
+            '<table class="totals"><tr>' +
+            '<td>' + selectedLines.length + ' line' + (selectedLines.length === 1 ? '' : 's') + '</td>' +
+            '<td align="right">Total Quantity: ' + totalQty + '</td>' +
+            '</tr></table>' +
+
+            // ---- Signatures ----
+            '<table class="sign">' +
+            '<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>' +
+            '<tr>' +
+            '<td class="sign-line">PICKED BY</td>' +
+            '<td class="sign-line">DATE</td>' +
+            '<td class="sign-line">CHECKED BY</td>' +
+            '<td class="sign-line">DATE</td>' +
+            '</tr>' +
+            '</table>' +
+
             '</body>' +
             '</pdf>';
     };
@@ -296,6 +490,16 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error'],
         if (!d) return '';
         try {
             return format.format({ value: d, type: format.Type.DATE });
+        } catch (e) {
+            return String(d);
+        }
+    };
+
+    /** Formats a date + time value for display; returns '' when empty. */
+    const formatDateTime = (d) => {
+        if (!d) return '';
+        try {
+            return format.format({ value: d, type: format.Type.DATETIME });
         } catch (e) {
             return String(d);
         }
