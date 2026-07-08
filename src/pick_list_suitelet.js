@@ -444,7 +444,6 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
             '<head>' +
             '<style type="text/css">' +
             '  body { font-family: Helvetica, sans-serif; font-size: 9pt; color: #1f2937; }' +
-            '  span.company { font-size: 8.5pt; color: #6b7280; letter-spacing: 2pt; }' +
             '  span.title { font-size: 25pt; font-weight: bold; color: #0b0f19; letter-spacing: 3pt; }' +
             '  span.so-num { font-size: 15pt; font-weight: bold; color: #0f766e; }' +
             '  span.status { font-size: 8.5pt; color: #6b7280; letter-spacing: 1pt; }' +
