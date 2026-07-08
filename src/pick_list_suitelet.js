@@ -13,8 +13,8 @@
  *   Script ID     : customscript_pick_list_sl
  *   Deployment ID : customdeploy_pick_list_sl
  */
-define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/search', 'N/config'],
-    (serverWidget, record, render, format, error, search, config) => {
+define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/search'],
+    (serverWidget, record, render, format, error, search) => {
 
     const SUBLIST_ID = 'custpage_items';
 
@@ -359,12 +359,6 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
         const shipAddress = esc(so.getValue({ fieldId: 'shipaddress' })).replace(/\r?\n/g, '<br />');
         const printedOn = esc(formatDateTime(new Date()));
 
-        let companyName = '';
-        try {
-            companyName = esc(config.load({ type: config.Type.COMPANY_INFORMATION })
-                .getValue({ fieldId: 'companyname' }));
-        } catch (e) { /* not critical */ }
-
         // ---- Line rows -----------------------------------------------------
         let rows = '';
         let totalQty = 0;
@@ -504,7 +498,6 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
             // ---- Title band ----
             '<table width="100%"><tr>' +
             '<td>' +
-            (companyName ? '<span class="company">' + companyName.toUpperCase() + '</span><br />' : '') +
             '<span class="title">PICK LIST</span>' +
             '</td>' +
             '<td align="right" style="vertical-align:bottom;">' +
