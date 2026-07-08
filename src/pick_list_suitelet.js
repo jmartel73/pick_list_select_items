@@ -410,7 +410,7 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
                 '<td>' + itemCell + '</td>' +
                 '<td class="desc">' + descCell + '</td>' +
                 '<td class="desc">' + (lineLoc || location || '&#8212;') + '</td>' +
-                '<td class="qty">' + esc(qty) +
+                '<td class="qty" align="right">' + esc(qty) +
                 (units ? '<br /><span class="unit">' + units.toUpperCase() + '</span>' : '') + '</td>' +
                 '<td class="pick"><table class="pickwrap" align="center"><tr>' +
                 '<td class="pickbox">&nbsp;</td></tr></table></td>' +
@@ -499,7 +499,7 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
             '</macro>' +
             '</macrolist>' +
             '</head>' +
-            '<body footer="nlfooter" footer-height="20pt" padding="0.5in 0.5in 0.75in 0.5in" size="Letter">' +
+            '<body footer="nlfooter" footer-height="12pt" padding="0.5in 0.5in 0.35in 0.5in" size="Letter">' +
 
             // ---- Title band ----
             '<table width="100%"><tr>' +
