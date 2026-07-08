@@ -404,20 +404,21 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
 
             const descCell = (options.printDescriptions && desc) ? desc : '&nbsp;';
 
-            const rowClass = (rowNum % 2 === 0) ? 'row alt' : 'row';
-
             rows +=
-                '<tr class="' + rowClass + '">' +
+                '<tr>' +
                 '<td class="num">' + rowNum + '</td>' +
                 '<td>' + itemCell + '</td>' +
-                '<td>' + descCell + '</td>' +
-                '<td>' + (lineLoc || location || '&nbsp;') + '</td>' +
-                '<td class="qty">' + esc(qty) + (units ? ' <span class="sub">' + units + '</span>' : '') + '</td>' +
-                '<td class="pickbox">&nbsp;</td>' +
+                '<td class="desc">' + descCell + '</td>' +
+                '<td class="desc">' + (lineLoc || location || '&#8212;') + '</td>' +
+                '<td class="qty">' + esc(qty) +
+                (units ? '<br /><span class="unit">' + units.toUpperCase() + '</span>' : '') + '</td>' +
+                '<td class="pick"><table class="pickwrap" align="center"><tr>' +
+                '<td class="pickbox">&nbsp;</td></tr></table></td>' +
                 '</tr>';
         }
 
-        // Two label/value pairs per row; optional pairs are skipped when empty
+        // Info blocks: label above value, two per row; optional blocks are
+        // skipped when empty (third element marks always-shown fields)
         const infoPairs = [
             ['CUSTOMER', customer, true],
             ['ORDER DATE', tranDate, true],
@@ -432,17 +433,15 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
             ['MEMO', memo, false]
         ].filter((pair) => pair[2] || pair[1]);
 
+        const blockCell = (pair) => (pair && pair[0])
+            ? '<td class="block" width="50%">' +
+              '<span class="blk-lbl">' + pair[0] + '</span><br />' +
+              '<span class="blk-val">' + (pair[1] || '&#8212;') + '</span></td>'
+            : '<td class="block" width="50%">&nbsp;</td>';
+
         let infoGrid = '';
         for (let p = 0; p < infoPairs.length; p += 2) {
-            const a = infoPairs[p];
-            const b = infoPairs[p + 1] || ['', '', false];
-            infoGrid +=
-                '<tr>' +
-                '<td class="lbl" width="17%">' + a[0] + '</td>' +
-                '<td class="val" width="33%">' + (a[1] || '&#8212;') + '</td>' +
-                '<td class="lbl" width="17%">' + b[0] + '</td>' +
-                '<td class="val" width="33%">' + (b[1] || (b[0] ? '&#8212;' : '&nbsp;')) + '</td>' +
-                '</tr>';
+            infoGrid += '<tr>' + blockCell(infoPairs[p]) + blockCell(infoPairs[p + 1]) + '</tr>';
         }
 
         return '<?xml version="1.0"?>' +
@@ -450,43 +449,52 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
             '<pdf>' +
             '<head>' +
             '<style type="text/css">' +
-            '  body { font-family: Helvetica, sans-serif; font-size: 9pt; color: #222222; }' +
-            '  span.company { font-size: 10pt; color: #555555; letter-spacing: 1pt; }' +
-            '  span.title { font-size: 22pt; font-weight: bold; color: #1a1a1a; }' +
-            '  span.so-num { font-size: 15pt; font-weight: bold; }' +
-            '  span.status { font-size: 9pt; color: #555555; }' +
-            '  table.info { width: 100%; margin-top: 10pt; }' +
-            '  table.info td { padding: 3pt 6pt 3pt 0; vertical-align: top; }' +
-            '  td.lbl { font-size: 7pt; color: #777777; }' +
-            '  td.val { font-size: 9.5pt; }' +
-            '  table.shipto { width: 100%; margin-top: 8pt; }' +
-            '  td.shipto-box { border: 0.75pt solid #cccccc; padding: 6pt 8pt;' +
-            '                  font-size: 9pt; background-color: #fafafa; }' +
-            '  table.items { width: 100%; margin-top: 14pt; }' +
-            '  table.items th { background-color: #2b2b2b; color: #ffffff; padding: 5pt 5pt;' +
-            '                   font-size: 8pt; letter-spacing: 0.5pt; text-align: left; }' +
-            '  table.items td { padding: 6pt 5pt; border-bottom: 0.5pt solid #dddddd;' +
+            '  body { font-family: Helvetica, sans-serif; font-size: 9pt; color: #1f2937; }' +
+            '  span.company { font-size: 8.5pt; color: #6b7280; letter-spacing: 2pt; }' +
+            '  span.title { font-size: 25pt; font-weight: bold; color: #0b0f19; letter-spacing: 3pt; }' +
+            '  span.so-num { font-size: 15pt; font-weight: bold; color: #0f766e; }' +
+            '  span.status { font-size: 8.5pt; color: #6b7280; letter-spacing: 1pt; }' +
+            '  table.rule td { font-size: 1pt; }' +
+            '  td.rule-accent { border-bottom: 2.5pt solid #0f766e; }' +
+            '  td.rule-rest { border-bottom: 0.75pt solid #e5e7eb; }' +
+            '  table.info { width: 100%; margin-top: 14pt; }' +
+            '  table.info td { vertical-align: top; }' +
+            '  td.block { padding: 5pt 8pt 5pt 0; vertical-align: top; }' +
+            '  span.blk-lbl { font-size: 6.5pt; color: #9ca3af; letter-spacing: 1.2pt; }' +
+            '  span.blk-val { font-size: 10pt; font-weight: bold; color: #111827; }' +
+            '  td.shipto-box { background-color: #f9fafb; border-left: 2.5pt solid #0f766e;' +
+            '                  padding: 8pt 10pt; font-size: 9pt; }' +
+            '  table.items { width: 100%; margin-top: 16pt; }' +
+            '  table.items th { border-bottom: 1.5pt solid #111827; padding: 0 5pt 5pt 5pt;' +
+            '                   font-size: 7pt; color: #6b7280; letter-spacing: 1.2pt; text-align: left; }' +
+            '  table.items td { padding: 8pt 5pt; border-bottom: 0.6pt solid #e5e7eb;' +
             '                   vertical-align: top; }' +
-            '  tr.alt td { background-color: #f5f5f5; }' +
-            '  td.num { color: #888888; }' +
-            '  td.qty { text-align: right; font-size: 11pt; font-weight: bold; }' +
-            '  td.pickbox { border: 1pt solid #333333; width: 28pt; }' +
-            '  span.item-name { font-weight: bold; }' +
-            '  span.sub { font-size: 7.5pt; color: #777777; font-weight: normal; }' +
-            '  table.totals { width: 100%; margin-top: 2pt; }' +
-            '  table.totals td { padding: 6pt 5pt; font-size: 9.5pt; font-weight: bold;' +
-            '                    border-top: 1.5pt solid #2b2b2b; }' +
-            '  table.sign { width: 100%; margin-top: 34pt; }' +
-            '  table.sign td { width: 25%; padding: 2pt 12pt 2pt 0; }' +
-            '  td.sign-line { border-top: 0.75pt solid #333333; font-size: 7.5pt;' +
-            '                 color: #777777; padding-top: 3pt; }' +
+            '  td.num { color: #9ca3af; font-size: 8pt; }' +
+            '  td.desc { color: #374151; }' +
+            '  td.qty { text-align: right; font-size: 13pt; font-weight: bold; color: #111827; }' +
+            '  span.unit { font-size: 7pt; color: #9ca3af; font-weight: normal; letter-spacing: 1pt; }' +
+            '  td.pick { text-align: center; }' +
+            '  table.pickwrap { width: 15pt; }' +
+            '  td.pickbox { width: 15pt; height: 15pt; border: 1.2pt solid #9ca3af; padding: 0; }' +
+            '  span.item-name { font-weight: bold; font-size: 10pt; }' +
+            '  span.sub { font-size: 7.5pt; color: #6b7280; font-weight: normal; }' +
+            '  table.totals { width: 100%; }' +
+            '  table.totals td { padding: 8pt 5pt; border-top: 1.5pt solid #111827; }' +
+            '  span.tot-lines { font-size: 8pt; color: #6b7280; letter-spacing: 1pt; }' +
+            '  span.tot-lbl { font-size: 7pt; color: #9ca3af; letter-spacing: 1.2pt; }' +
+            '  span.tot-val { font-size: 14pt; font-weight: bold; color: #0f766e; }' +
+            '  table.sign { width: 100%; margin-top: 42pt; }' +
+            '  td.sign-line { width: 22%; border-top: 0.9pt solid #9ca3af; font-size: 6.5pt;' +
+            '                 color: #9ca3af; letter-spacing: 1.2pt; padding-top: 4pt; }' +
+            '  td.sign-gap { width: 4%; }' +
             '</style>' +
             '<macrolist>' +
             '<macro id="nlfooter">' +
             '<table width="100%"><tr>' +
-            '<td style="font-size:7.5pt; color:#777777;">Pick List &#8226; Sales Order #' + tranId +
-            ' &#8226; Printed ' + printedOn + '</td>' +
-            '<td align="right" style="font-size:7.5pt; color:#777777;">Page <pagenumber/> of <totalpages/></td>' +
+            '<td style="font-size:7pt; color:#9ca3af;">PICK LIST' +
+            ' <span style="color:#0f766e;">&#8226;</span> SO #' + tranId +
+            ' <span style="color:#0f766e;">&#8226;</span> Printed ' + printedOn + '</td>' +
+            '<td align="right" style="font-size:7pt; color:#9ca3af;">Page <pagenumber/> of <totalpages/></td>' +
             '</tr></table>' +
             '</macro>' +
             '</macrolist>' +
@@ -501,19 +509,22 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
             '</td>' +
             '<td align="right" style="vertical-align:bottom;">' +
             '<span class="so-num">SO #' + tranId + '</span><br />' +
-            '<span class="status">' + status + '</span>' +
+            '<span class="status">' + status.toUpperCase() + '</span>' +
             '</td>' +
             '</tr></table>' +
-            '<hr style="margin-top:6pt; color:#2b2b2b; height:1.5pt;" />' +
+            '<table class="rule" width="100%" style="margin-top:8pt;"><tr>' +
+            '<td class="rule-accent" width="18%">&nbsp;</td>' +
+            '<td class="rule-rest" width="82%">&nbsp;</td>' +
+            '</tr></table>' +
 
             // ---- Order info + ship-to ----
-            '<table class="info"><tr><td width="58%" style="padding-right:14pt;">' +
+            '<table class="info"><tr><td width="58%" style="padding-right:16pt;">' +
             '<table width="100%">' + infoGrid + '</table>' +
             '</td><td width="42%">' +
-            '<table class="shipto">' +
-            '<tr><td class="lbl">SHIP TO</td></tr>' +
-            '<tr><td class="shipto-box">' + (shipAddress || '&#8212;') + '</td></tr>' +
-            '</table>' +
+            '<span class="blk-lbl">SHIP TO</span>' +
+            '<table width="100%" style="margin-top:3pt;"><tr>' +
+            '<td class="shipto-box">' + (shipAddress || '&#8212;') + '</td>' +
+            '</tr></table>' +
             '</td></tr></table>' +
 
             // ---- Item lines ----
@@ -521,11 +532,11 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
             '<thead>' +
             '<tr>' +
             '<th width="4%">#</th>' +
-            '<th width="24%">ITEM</th>' +
-            '<th width="35%">DESCRIPTION</th>' +
+            '<th width="26%">ITEM</th>' +
+            '<th width="33%">DESCRIPTION</th>' +
             '<th width="15%">LOCATION</th>' +
             '<th width="12%" align="right">QTY</th>' +
-            '<th width="10%">PICKED</th>' +
+            '<th width="10%" align="center">PICKED</th>' +
             '</tr>' +
             '</thead>' +
             rows +
@@ -533,20 +544,23 @@ define(['N/ui/serverWidget', 'N/record', 'N/render', 'N/format', 'N/error', 'N/s
 
             // ---- Totals ----
             '<table class="totals"><tr>' +
-            '<td>' + selectedLines.length + ' line' + (selectedLines.length === 1 ? '' : 's') + '</td>' +
-            '<td align="right">Total Quantity: ' + totalQty + '</td>' +
+            '<td style="vertical-align:bottom;"><span class="tot-lines">' +
+            selectedLines.length + (selectedLines.length === 1 ? ' LINE' : ' LINES') +
+            '</span></td>' +
+            '<td align="right"><span class="tot-lbl">TOTAL QTY&nbsp;&nbsp;</span>' +
+            '<span class="tot-val">' + totalQty + '</span></td>' +
             '</tr></table>' +
 
             // ---- Signatures ----
-            '<table class="sign">' +
-            '<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>' +
-            '<tr>' +
+            '<table class="sign"><tr>' +
             '<td class="sign-line">PICKED BY</td>' +
+            '<td class="sign-gap">&nbsp;</td>' +
             '<td class="sign-line">DATE</td>' +
+            '<td class="sign-gap">&nbsp;</td>' +
             '<td class="sign-line">CHECKED BY</td>' +
+            '<td class="sign-gap">&nbsp;</td>' +
             '<td class="sign-line">DATE</td>' +
-            '</tr>' +
-            '</table>' +
+            '</tr></table>' +
 
             '</body>' +
             '</pdf>';
